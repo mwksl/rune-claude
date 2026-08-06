@@ -18,8 +18,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/matthewstingel/rune-claude/internal/hookio"
-	"github.com/matthewstingel/rune-claude/internal/ledger"
+	"github.com/mwksl/rune-claude/internal/hookio"
+	"github.com/mwksl/rune-claude/internal/ledger"
+	"github.com/mwksl/rune-claude/internal/transcript"
 )
 
 func main() {
@@ -36,6 +37,8 @@ func main() {
 		exitOn(runStatus())
 	case "diff":
 		exitOn(runDiff(os.Args[2:]))
+	case "feed":
+		exitOn(runFeed(os.Args[2:]))
 	case "clear":
 		exitOn(runClear())
 	case "-h", "--help", "help":
@@ -56,6 +59,7 @@ usage:
                               (--user targets ~/.claude/settings.json instead)
   rune-claude status          list recorded sessions and changed files
   rune-claude diff <file>     unified diff of a file against its baseline
+  rune-claude feed [--follow] print the latest session's conversation feed
   rune-claude clear           forget all recorded changes and snapshots
 `)
 }
@@ -376,6 +380,85 @@ func runDiff(args []string) error {
 	}
 	fmt.Print(patch)
 	return nil
+}
+
+// runFeed prints the most recently active session's conversation feed:
+// the same data the Rune feed window renders, for terminals and debugging.
+func runFeed(args []string) error {
+	fs := flag.NewFlagSet("feed", flag.ExitOnError)
+	follow := fs.Bool("follow", false, "keep tailing and print new entries as they arrive")
+	tailN := fs.Int("n", 40, "number of trailing entries to print initially")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	st, err := ledger.Open(ledger.DefaultDir())
+	if err != nil {
+		return err
+	}
+	var candidates []string
+	if evs, err := st.Events(); err == nil {
+		seen := map[string]bool{}
+		for i := len(evs) - 1; i >= 0; i-- {
+			if t := evs[i].Transcript; t != "" && !seen[t] {
+				seen[t] = true
+				candidates = append(candidates, t)
+			}
+		}
+	}
+	path, _ := transcript.Latest(candidates)
+	if path == "" {
+		return fmt.Errorf("no Claude Code transcript found")
+	}
+	fmt.Printf("── session %s · %s\n", transcript.SessionLabel(path), path)
+
+	tail := transcript.NewTail(path)
+	entries, err := tail.Next()
+	if err != nil {
+		return err
+	}
+	if len(entries) > *tailN {
+		entries = entries[len(entries)-*tailN:]
+	}
+	printEntries(entries)
+
+	if !*follow {
+		return nil
+	}
+	for {
+		time.Sleep(500 * time.Millisecond)
+		entries, err := tail.Next()
+		if err != nil {
+			return err
+		}
+		printEntries(entries)
+	}
+}
+
+func printEntries(entries []transcript.Entry) {
+	for _, e := range entries {
+		ts := e.Time.Local().Format("15:04:05")
+		switch e.Kind {
+		case "tool":
+			detail := e.Text
+			if detail != "" {
+				detail = " · " + detail
+			}
+			fmt.Printf("%s  ⚒ %s%s\n", ts, e.Tool, detail)
+		case "thinking":
+			if e.Text == "" {
+				fmt.Printf("%s  ✻ thinking…\n", ts)
+			} else {
+				fmt.Printf("%s  ✻ %s\n", ts, e.Text)
+			}
+		default:
+			marker := "•"
+			if e.Role == "user" {
+				marker = "❯"
+			}
+			fmt.Printf("%s  %s %s\n", ts, marker, e.Text)
+		}
+	}
 }
 
 func runClear() error {

@@ -37,4 +37,7 @@ type Event struct {
 	Tool    string    `json:"tool,omitempty"`
 	Path    string    `json:"path,omitempty"`
 	Action  Action    `json:"action,omitempty"`
+	// Transcript is the session's JSONL transcript path as reported by the
+	// hook payload; the feed view tails it.
+	Transcript string `json:"transcript,omitempty"`
 }

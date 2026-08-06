@@ -11,18 +11,19 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/matthewstingel/rune-claude/internal/ledger"
+	"github.com/mwksl/rune-claude/internal/ledger"
 )
 
 // Payload is the subset of a Claude Code hook event this tool consumes.
 // See https://code.claude.com/docs/en/hooks for the full schema.
 type Payload struct {
-	HookEventName string          `json:"hook_event_name"`
-	SessionID     string          `json:"session_id"`
-	CWD           string          `json:"cwd"`
-	ToolName      string          `json:"tool_name"`
-	ToolInput     json.RawMessage `json:"tool_input"`
-	Timestamp     string          `json:"timestamp"`
+	HookEventName  string          `json:"hook_event_name"`
+	SessionID      string          `json:"session_id"`
+	TranscriptPath string          `json:"transcript_path"`
+	CWD            string          `json:"cwd"`
+	ToolName       string          `json:"tool_name"`
+	ToolInput      json.RawMessage `json:"tool_input"`
+	Timestamp      string          `json:"timestamp"`
 }
 
 type toolInput struct {
@@ -85,7 +86,7 @@ func (p Payload) TargetPath() string {
 //
 // Anything else is ignored.
 func Process(st *ledger.Store, p Payload, now time.Time) error {
-	base := ledger.Event{Time: now, Session: p.SessionID, CWD: p.CWD}
+	base := ledger.Event{Time: now, Session: p.SessionID, CWD: p.CWD, Transcript: p.TranscriptPath}
 
 	switch p.HookEventName {
 	case "PreToolUse":

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/matthewstingel/rune-claude/internal/ledger"
+	"github.com/mwksl/rune-claude/internal/ledger"
 )
 
 func TestBuildModelGroupsAndOrders(t *testing.T) {

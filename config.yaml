@@ -1,4 +1,4 @@
-# Rune package overlay: `pkg install github.com/matthewstingel/rune-claude`
+# Rune package overlay: `pkg install github.com/mwksl/rune-claude`
 # installs the claude-changes extension, run from source via the Go toolchain.
 requirements:
   - go

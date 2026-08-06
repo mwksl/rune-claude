@@ -21,17 +21,18 @@ import (
 	"github.com/unstablebuild/rune-go-sdk/iterator"
 	"github.com/unstablebuild/rune-go-sdk/term"
 
-	"github.com/matthewstingel/rune-claude/internal/ledger"
+	"github.com/mwksl/rune-claude/internal/ledger"
+	"github.com/mwksl/rune-claude/internal/transcript"
 )
 
 func main() {
 	meta := extensionapi.Metadata{
-		DeveloperID:      "matthewstingel",
+		DeveloperID:      "mwksl",
 		DeveloperKey:     "0000",
 		DeveloperEmail:   "matthewstingel@fastmail.com",
 		ExtensionID:      "claude-changes",
 		ExtensionName:    "Claude Changes",
-		ExtensionVersion: "0.1.0",
+		ExtensionVersion: "0.2.0",
 		Permissions: extensionapi.NewPermissions(
 			extensionapi.PermissionCommands,
 			extensionapi.PermissionFileSystem,
@@ -65,13 +66,21 @@ func run(ctx context.Context, ws *extensionapi.Workspace, _ config.Config) error
 		intr:   ws.Interrupter(ctx),
 	}
 
-	manual := textapi.CommandManual{
+	changesManual := textapi.CommandManual{
 		Name:     "claude-changes",
 		Summary:  "Show the files Claude Code is changing in this and other sessions.",
 		Synopsis: "[open|clear]",
 	}
-	if err := ws.RegisterCommand(manual, svc); err != nil {
+	if err := ws.RegisterCommand(changesManual, svc); err != nil {
 		return fmt.Errorf("register command: %w", err)
+	}
+	feedManual := textapi.CommandManual{
+		Name:     "claude-feed",
+		Summary:  "Live feed of the most recent Claude Code conversation.",
+		Synopsis: "[open]",
+	}
+	if err := ws.RegisterCommand(feedManual, svc); err != nil {
+		return fmt.Errorf("register feed command: %w", err)
 	}
 
 	go svc.poll(ctx)
@@ -94,6 +103,12 @@ type service struct {
 	win      browserapi.Window
 	origin   browserapi.Window
 	lastSize int64
+
+	feed       *feed
+	feedWin    browserapi.Window
+	tail       *transcript.Tail
+	followPath string
+	scanTick   int
 }
 
 // poll watches the ledger for growth (or truncation) and pushes fresh
@@ -118,11 +133,79 @@ func (s *service) poll(ctx context.Context) {
 		p := s.panel
 		s.mu.Unlock()
 
-		if !changed || p == nil {
+		if changed && p != nil {
+			s.refresh(ctx, p)
+		}
+
+		s.feedTick(ctx)
+	}
+}
+
+// feedTick keeps the open feed pointed at the most recently active
+// transcript and appends whatever that session wrote since last tick.
+func (s *service) feedTick(ctx context.Context) {
+	s.mu.Lock()
+	f := s.feed
+	tail := s.tail
+	s.scanTick++
+	rescan := s.scanTick%4 == 0 || tail == nil // re-pick target every ~2s
+	s.mu.Unlock()
+	if f == nil {
+		return
+	}
+
+	if rescan {
+		path, _ := transcript.Latest(s.transcriptCandidates())
+		if path != "" {
+			s.mu.Lock()
+			if path != s.followPath {
+				s.followPath = path
+				tail = transcript.NewTail(path)
+				s.tail = tail
+				s.mu.Unlock()
+				f.Reset(transcript.SessionLabel(path))
+			} else {
+				s.mu.Unlock()
+			}
+		}
+	}
+	if tail == nil {
+		s.mu.Lock()
+		tail = s.tail
+		s.mu.Unlock()
+		if tail == nil {
+			return
+		}
+	}
+
+	entries, err := tail.Next()
+	if err != nil || len(entries) == 0 {
+		return
+	}
+	f.Append(entries)
+	if err := s.intr.Interrupt(ctx); err != nil {
+		slog.Warn("interrupt failed", "error", err)
+	}
+}
+
+// transcriptCandidates lists transcript paths recorded in the ledger,
+// most recent activity first.
+func (s *service) transcriptCandidates() []string {
+	evs, err := s.st.Events()
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for i := len(evs) - 1; i >= 0; i-- {
+		t := evs[i].Transcript
+		if t == "" || seen[t] {
 			continue
 		}
-		s.refresh(ctx, p)
+		seen[t] = true
+		out = append(out, t)
 	}
+	return out
 }
 
 func (s *service) refresh(ctx context.Context, p *panel) {
@@ -136,13 +219,22 @@ func (s *service) refresh(ctx context.Context, p *panel) {
 	}
 }
 
-// HandleCommand implements the `claude-changes` command: no argument (or
-// "open") toggles the panel; "clear" wipes the ledger.
+// HandleCommand dispatches both registered commands: `claude-changes`
+// toggles the file panel (or clears the ledger), `claude-feed` toggles the
+// live conversation feed.
 func (s *service) HandleCommand(ctx context.Context, cmd textapi.Command) error {
 	sub := "open"
 	if len(cmd.Args) > 0 {
 		sub = cmd.Args[0]
 	}
+
+	if cmd.Name == "claude-feed" {
+		if sub != "open" {
+			return fmt.Errorf("unknown subcommand %q: claude-feed [open]", sub)
+		}
+		return s.toggleFeed(ctx, cmd.Window)
+	}
+
 	switch sub {
 	case "open":
 		return s.togglePanel(ctx, cmd.Window)
@@ -163,7 +255,10 @@ func (s *service) HandleCommand(ctx context.Context, cmd textapi.Command) error 
 }
 
 // Complete implements command completion.
-func (s *service) Complete(context.Context, string, []string) (iterator.Iterator[string], error) {
+func (s *service) Complete(_ context.Context, cmd string, _ []string) (iterator.Iterator[string], error) {
+	if cmd == "claude-feed" {
+		return iterator.FromSlice([]string{"open"}), nil
+	}
 	return iterator.FromSlice([]string{"open", "clear"}), nil
 }
 
@@ -210,6 +305,75 @@ func (s *service) togglePanel(ctx context.Context, origin browserapi.Window) err
 	s.lastSize = size
 	s.mu.Unlock()
 	return nil
+}
+
+func (s *service) toggleFeed(ctx context.Context, origin browserapi.Window) error {
+	s.mu.Lock()
+	if s.feedWin != nil {
+		win := s.feedWin
+		s.feedWin, s.feed, s.tail, s.followPath = nil, nil, nil, ""
+		s.mu.Unlock()
+		return s.wm.CloseWindow(win)
+	}
+	s.mu.Unlock()
+
+	if origin == nil {
+		w, err := s.wm.Focus()
+		if err != nil {
+			return fmt.Errorf("no window to split: %w", err)
+		}
+		origin = w
+	}
+
+	f := newFeed(feedActions{
+		closeReq: func() { go s.closeFeed() },
+		onClosed: func() { s.forgetFeed() },
+	})
+
+	// Point at the current transcript immediately so the feed opens with
+	// history instead of waiting for the next poll tick.
+	path, _ := transcript.Latest(s.transcriptCandidates())
+	var tail *transcript.Tail
+	if path != "" {
+		tail = transcript.NewTail(path)
+		f.Reset(transcript.SessionLabel(path))
+		if entries, err := tail.Next(); err == nil {
+			f.Append(entries)
+		}
+	} else {
+		f.Reset("no session found")
+	}
+
+	win, err := s.wm.Split(browserapi.OrientationBottom, origin, f)
+	if err != nil {
+		return fmt.Errorf("split window: %w", err)
+	}
+
+	s.mu.Lock()
+	s.feed, s.feedWin, s.tail, s.followPath = f, win, tail, path
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *service) closeFeed() {
+	s.mu.Lock()
+	win := s.feedWin
+	s.feedWin, s.feed, s.tail, s.followPath = nil, nil, nil, ""
+	s.mu.Unlock()
+	if win == nil {
+		return
+	}
+	if err := s.wm.CloseWindow(win); err != nil {
+		s.notifyErr("close feed: %v", err)
+	}
+}
+
+// forgetFeed drops feed state without touching the window — used when the
+// host already closed it.
+func (s *service) forgetFeed() {
+	s.mu.Lock()
+	s.feedWin, s.feed, s.tail, s.followPath = nil, nil, nil, ""
+	s.mu.Unlock()
 }
 
 func (s *service) closePanel() {

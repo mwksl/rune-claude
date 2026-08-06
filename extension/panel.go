@@ -9,7 +9,7 @@ import (
 
 	"github.com/unstablebuild/rune-go-sdk/term"
 
-	"github.com/matthewstingel/rune-claude/internal/ledger"
+	"github.com/mwksl/rune-claude/internal/ledger"
 )
 
 // panelActions are the callbacks the panel fires on user input. They must

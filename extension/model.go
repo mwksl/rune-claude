@@ -4,7 +4,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/matthewstingel/rune-claude/internal/ledger"
+	"github.com/mwksl/rune-claude/internal/ledger"
 )
 
 // FileRow is one changed file inside a session, aggregated over all of the

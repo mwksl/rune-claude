@@ -1,4 +1,4 @@
-module github.com/matthewstingel/rune-claude
+module github.com/mwksl/rune-claude
 
 go 1.26.3
 

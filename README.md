@@ -12,7 +12,10 @@ fills that gap with two pieces:
   snapshots each file's pre-edit content the first time a session touches it.
 - **`claude-changes`** — a Rune extension that watches that ledger and shows
   a live panel of changed files per Claude session: open them, view a diff
-  against the pre-edit baseline, or clear the list.
+  against the pre-edit baseline, or clear the list. It also ships a
+  **`claude-feed`** window: a live feed of the most recent session's
+  conversation — your prompts, Claude's responses and thinking, and every
+  tool call as it happens.
 
 ```
  Claude changes
@@ -32,10 +35,10 @@ Requires Go 1.25+.
 
 ```sh
 # the hook CLI, onto your PATH
-go install github.com/matthewstingel/rune-claude/cmd/rune-claude@latest
+go install github.com/mwksl/rune-claude/cmd/rune-claude@latest
 
 # the extension, as a Rune package (from Rune's console)
-pkg install github.com/matthewstingel/rune-claude
+pkg install github.com/mwksl/rune-claude
 ```
 
 To run the extension from a checkout instead (Rune console):
@@ -78,11 +81,27 @@ panel; it splits the current window. Keys:
 | `c` | clear all recorded changes and snapshots |
 | `q` / `Esc` | close the panel |
 
+The `claude-feed` command toggles the conversation feed (splits below the
+current window). It follows whichever transcript on the machine is most
+recently active, switching automatically when another session takes over:
+
+| key | action |
+| --- | ------ |
+| `↑`/`↓`, `k`/`j`, wheel | scroll (scrolling up pauses follow) |
+| `f` / `End` | resume following the tail |
+| `t` | show/hide thinking |
+| `q` / `Esc` | close the feed |
+
+Whether thinking text appears depends on the session: Claude Code persists
+extended thinking to some transcripts and only a signature to others. When
+it's absent the feed still shows a `✻ thinking…` activity marker.
+
 From any terminal:
 
 ```sh
-rune-claude status         # sessions and changed files
-rune-claude diff <file>    # unified diff vs pre-edit baseline
+rune-claude status              # sessions and changed files
+rune-claude diff <file>         # unified diff vs pre-edit baseline
+rune-claude feed [--follow]     # the same conversation feed, in a terminal
 rune-claude clear
 ```
 
@@ -111,3 +130,7 @@ Rune IDE ◀── claude-changes extension (Go SDK: Split/Open/Notify) ◀─�
   [claudecode.nvim's PROTOCOL.md](https://github.com/coder/claudecode.nvim/blob/main/PROTOCOL.md).
 - Workspace-scoped filtering of sessions.
 - `git diff --no-index`-quality colorized diffs in a dedicated viewer.
+
+---
+
+By Matthew "[mwksl](https://github.com/mwksl)" Stingel.

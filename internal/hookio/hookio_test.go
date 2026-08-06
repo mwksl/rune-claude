@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/matthewstingel/rune-claude/internal/ledger"
+	"github.com/mwksl/rune-claude/internal/ledger"
 )
 
 // payload mimics the JSON Claude Code delivers on hook stdin.
