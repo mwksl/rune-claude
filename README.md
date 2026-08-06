@@ -44,8 +44,12 @@ pkg install github.com/mwksl/rune-claude
 To run the extension from a checkout instead (Rune console):
 
 ```
-extensions start claude-changes /path/to/rune-claude/extension
+extensions start claude-changes /path/to/rune-claude
 ```
+
+(The repo root is the extension's Go package — Rune requires the source
+entrypoint to be a package directory with its own `go.mod`. The hook CLI
+lives in `cmd/rune-claude`.)
 
 On first use Rune will prompt to authorize the extension's permissions
 (commands, file system, window manager, resource opener, notifications,

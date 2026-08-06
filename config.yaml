@@ -4,4 +4,4 @@ requirements:
   - go
 extensions:
   claude-changes:
-    path: '$RUNE_DATADIR/lib/$RUNE_PKG_ID/extension'
+    path: '$RUNE_DATADIR/lib/$RUNE_PKG_ID'
