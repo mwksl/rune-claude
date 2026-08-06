@@ -1,0 +1,6 @@
+# Workspace config for hacking on rune-claude inside Rune itself:
+# auto-starts the claude-changes extension from the local build.
+# Run `make build` first.
+extensions:
+  claude-changes:
+    path: '/Users/matthewstingel/Development/rune-claude/bin/claude-changes'
