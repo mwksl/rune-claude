@@ -32,7 +32,7 @@ func main() {
 		DeveloperEmail:   "matthewstingel@fastmail.com",
 		ExtensionID:      "claude-changes",
 		ExtensionName:    "Claude Changes",
-		ExtensionVersion: "0.2.0",
+		ExtensionVersion: "0.3.0",
 		Permissions: extensionapi.NewPermissions(
 			extensionapi.PermissionCommands,
 			extensionapi.PermissionFileSystem,
@@ -281,11 +281,13 @@ func (s *service) togglePanel(ctx context.Context, origin browserapi.Window) err
 	}
 
 	p := newPanel(panelActions{
-		open:     func(row FileRow) { go s.openFile(ctx, row) },
-		diff:     func(row FileRow) { go s.openDiff(ctx, row) },
-		clear:    func() { go s.clearLedger(ctx) },
-		closeReq: func() { go s.closePanel() },
-		onClosed: func() { s.forgetPanel() },
+		open:          func(row FileRow) { go s.openFile(ctx, row) },
+		diff:          func(row FileRow) { go s.openDiff(ctx, row) },
+		clear:         func() { go s.clearLedger(ctx) },
+		removeSession: func(id string) { go s.removeSession(ctx, id) },
+		removeEnded:   func() { go s.removeEnded(ctx) },
+		closeReq:      func() { go s.closePanel() },
+		onClosed:      func() { s.forgetPanel() },
 	})
 
 	evs, err := s.st.Events()
@@ -466,6 +468,45 @@ func (s *service) showInOrigin(h browserapi.Handler) {
 	}
 	if err := s.wm.SetWindowContent(origin, h); err != nil {
 		s.notifyInfo("opened in a new tab (original window is gone)")
+	}
+}
+
+// removeSession drops one session's events and snapshots from the ledger.
+func (s *service) removeSession(ctx context.Context, id string) {
+	if err := s.st.RemoveSessions(id); err != nil {
+		s.notifyErr("drop session: %v", err)
+		return
+	}
+	s.refreshOpenPanel(ctx)
+	s.notifyInfo("dropped session %s", shortID(id))
+}
+
+// removeEnded drops every session whose last lifecycle event is an end.
+func (s *service) removeEnded(ctx context.Context) {
+	evs, err := s.st.Events()
+	if err != nil {
+		s.notifyErr("drop ended sessions: %v", err)
+		return
+	}
+	ids := ledger.EndedSessions(evs)
+	if len(ids) == 0 {
+		s.notifyInfo("no ended sessions to drop")
+		return
+	}
+	if err := s.st.RemoveSessions(ids...); err != nil {
+		s.notifyErr("drop ended sessions: %v", err)
+		return
+	}
+	s.refreshOpenPanel(ctx)
+	s.notifyInfo("dropped %d ended session(s)", len(ids))
+}
+
+func (s *service) refreshOpenPanel(ctx context.Context) {
+	s.mu.Lock()
+	p := s.panel
+	s.mu.Unlock()
+	if p != nil {
+		s.refresh(ctx, p)
 	}
 }
 

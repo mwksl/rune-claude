@@ -15,11 +15,13 @@ import (
 // panelActions are the callbacks the panel fires on user input. They must
 // not block: the service runs the real work on its own goroutines.
 type panelActions struct {
-	open     func(FileRow)
-	diff     func(FileRow)
-	clear    func()
-	closeReq func()
-	onClosed func()
+	open          func(FileRow)
+	diff          func(FileRow)
+	clear         func()
+	removeSession func(session string)
+	removeEnded   func()
+	closeReq      func()
+	onClosed      func()
 }
 
 // line is one rendered content row: left-aligned text plus a right-aligned
@@ -162,7 +164,7 @@ func (p *panel) Draw(w term.Writer) {
 		drawLine(w, y, p.width, l.left, l.right, attrs)
 	}
 
-	help := " ⏎ open · d diff · c clear · r refresh · q close"
+	help := " ⏎ open · d diff · x drop session · X drop ended · c clear · q close"
 	drawLine(w, p.height-1, p.width, help, "", term.Attributes{Attrs: term.AttrUnderline})
 }
 
@@ -191,6 +193,16 @@ func (p *panel) Handle(ev term.Event) (exit, handled bool) {
 	case ev.Ch == 'd':
 		if row, ok := p.selected(); ok && p.actions.diff != nil {
 			p.actions.diff(row)
+		}
+		return false, true
+	case ev.Ch == 'x':
+		if row, ok := p.selected(); ok && p.actions.removeSession != nil {
+			p.actions.removeSession(row.Session)
+		}
+		return false, true
+	case ev.Ch == 'X':
+		if p.actions.removeEnded != nil {
+			p.actions.removeEnded()
 		}
 		return false, true
 	case ev.Ch == 'c':

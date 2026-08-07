@@ -224,3 +224,56 @@ func TestClear(t *testing.T) {
 		t.Fatal("snapshot survived Clear")
 	}
 }
+
+func TestRemoveSessions(t *testing.T) {
+	st := mustOpen(t)
+	dir := t.TempDir()
+	keepFile := filepath.Join(dir, "keep.txt")
+	dropFile := filepath.Join(dir, "drop.txt")
+	os.WriteFile(keepFile, []byte("k"), 0o644)
+	os.WriteFile(dropFile, []byte("d"), 0o644)
+	st.EnsureSnapshot("keep", keepFile)
+	st.EnsureSnapshot("drop", dropFile)
+	st.Append(Event{Kind: KindSessionStart, Session: "keep"})
+	st.Append(Event{Kind: KindChange, Session: "keep", Path: keepFile})
+	st.Append(Event{Kind: KindSessionStart, Session: "drop"})
+	st.Append(Event{Kind: KindChange, Session: "drop", Path: dropFile})
+
+	if err := st.RemoveSessions("drop"); err != nil {
+		t.Fatalf("RemoveSessions: %v", err)
+	}
+
+	evs, err := st.Events()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range evs {
+		if ev.Session == "drop" {
+			t.Fatalf("drop session survived: %+v", ev)
+		}
+	}
+	if len(evs) != 2 {
+		t.Fatalf("got %d events, want 2 kept", len(evs))
+	}
+	if _, _, ok, _ := st.SnapshotFor("drop", dropFile); ok {
+		t.Fatal("drop snapshot survived")
+	}
+	if _, _, ok, _ := st.SnapshotFor("keep", keepFile); !ok {
+		t.Fatal("keep snapshot was removed")
+	}
+}
+
+func TestEndedSessions(t *testing.T) {
+	evs := []Event{
+		{Kind: KindSessionStart, Session: "a"},
+		{Kind: KindSessionEnd, Session: "a"},
+		{Kind: KindSessionStart, Session: "b"},
+		{Kind: KindSessionEnd, Session: "b"},
+		{Kind: KindSessionStart, Session: "b"}, // resumed
+		{Kind: KindChange, Session: "c", Path: "/x"},
+	}
+	got := EndedSessions(evs)
+	if len(got) != 1 || got[0] != "a" {
+		t.Fatalf("EndedSessions = %v, want [a]", got)
+	}
+}

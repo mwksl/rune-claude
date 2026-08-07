@@ -40,7 +40,7 @@ func main() {
 	case "feed":
 		exitOn(runFeed(os.Args[2:]))
 	case "clear":
-		exitOn(runClear())
+		exitOn(runClear(os.Args[2:]))
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -61,6 +61,8 @@ usage:
   rune-claude diff <file>     unified diff of a file against its baseline
   rune-claude feed [--follow] print the latest session's conversation feed
   rune-claude clear           forget all recorded changes and snapshots
+        --session <id>        forget one session (id or unique prefix)
+        --ended               forget only sessions that have ended
 `)
 }
 
@@ -461,14 +463,81 @@ func printEntries(entries []transcript.Entry) {
 	}
 }
 
-func runClear() error {
+func runClear(args []string) error {
+	fs := flag.NewFlagSet("clear", flag.ExitOnError)
+	session := fs.String("session", "", "forget one session (id or unique prefix)")
+	ended := fs.Bool("ended", false, "forget only sessions that have ended")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *session != "" && *ended {
+		return fmt.Errorf("--session and --ended are mutually exclusive")
+	}
+
 	st, err := ledger.Open(ledger.DefaultDir())
 	if err != nil {
 		return err
 	}
-	if err := st.Clear(); err != nil {
-		return err
+
+	switch {
+	case *session != "":
+		id, err := resolveSession(st, *session)
+		if err != nil {
+			return err
+		}
+		if err := st.RemoveSessions(id); err != nil {
+			return err
+		}
+		fmt.Printf("forgot session %s\n", shortID(id))
+	case *ended:
+		evs, err := st.Events()
+		if err != nil {
+			return err
+		}
+		ids := ledger.EndedSessions(evs)
+		if len(ids) == 0 {
+			fmt.Println("no ended sessions to forget")
+			return nil
+		}
+		if err := st.RemoveSessions(ids...); err != nil {
+			return err
+		}
+		fmt.Printf("forgot %d ended session(s)\n", len(ids))
+	default:
+		if err := st.Clear(); err != nil {
+			return err
+		}
+		fmt.Println("cleared recorded changes and snapshots")
 	}
-	fmt.Println("cleared recorded changes and snapshots")
 	return nil
+}
+
+// resolveSession expands a session id or unique prefix against the ledger.
+func resolveSession(st *ledger.Store, query string) (string, error) {
+	evs, err := st.Events()
+	if err != nil {
+		return "", err
+	}
+	seen := map[string]bool{}
+	var matches []string
+	for _, ev := range evs {
+		if seen[ev.Session] {
+			continue
+		}
+		seen[ev.Session] = true
+		if ev.Session == query {
+			return query, nil
+		}
+		if strings.HasPrefix(ev.Session, query) {
+			matches = append(matches, ev.Session)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("no session matches %q (see rune-claude status)", query)
+	case 1:
+		return matches[0], nil
+	default:
+		return "", fmt.Errorf("%q is ambiguous: matches %d sessions", query, len(matches))
+	}
 }

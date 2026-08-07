@@ -82,6 +82,8 @@ panel; it splits the current window. Keys:
 | `↑`/`↓`, `k`/`j` | move selection |
 | `Enter` | open the file in the window the panel was launched from |
 | `d` | open a unified diff against the session's pre-edit baseline |
+| `x` | drop the selected session from the ledger |
+| `X` | drop every session that has ended |
 | `c` | clear all recorded changes and snapshots |
 | `q` / `Esc` | close the panel |
 
@@ -106,7 +108,9 @@ From any terminal:
 rune-claude status              # sessions and changed files
 rune-claude diff <file>         # unified diff vs pre-edit baseline
 rune-claude feed [--follow]     # the same conversation feed, in a terminal
-rune-claude clear
+rune-claude clear               # everything…
+rune-claude clear --ended       # …or only sessions that have ended
+rune-claude clear --session 4f2a  # …or one session, by id prefix
 ```
 
 ## How it works
